@@ -1,107 +1,155 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Blue Monkey 3D (PS1 style)</title>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Blue Monkey 3D — Banana Rush (PS1-ish)</title>
 <style>
   html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,Arial}
-  #hud{position:fixed;top:8px;left:0;right:0;text-align:center;color:#fff;font-weight:700;text-shadow:0 1px 2px #000}
+  #hud{position:fixed;top:8px;left:0;right:0;text-align:center;color:#fff;
+       font-weight:700;text-shadow:0 1px 2px #000;pointer-events:none}
   canvas{touch-action:none;image-rendering: pixelated;}
 </style>
 </head>
 <body>
-<div id="hud">Drag to move • Catch bananas • 30s</div>
+<div id="hud">Drag/Arrows to move • Catch bananas • 30s</div>
 <canvas id="game"></canvas>
 
-<!-- Three.js from CDN -->
 <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
-
 <script>
 (() => {
   const canvas = document.getElementById('game');
   const renderer = new THREE.WebGLRenderer({ canvas, antialias:false, powerPreference:'low-power' });
-  renderer.setClearColor(0x1a1f2b, 1);
+  renderer.setClearColor(0x0c1012, 1);
 
   const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(0x0c1012, 18, 40); // PS1-style atmospheric fog
 
-  // Camera — PS1-ish narrow FOV
-  const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
-  camera.position.set(0, 7.5, 16);
+  // Camera — slightly narrow FOV, classic early 3D feel
+  const camera = new THREE.PerspectiveCamera(52, 1, 0.1, 200);
+  camera.position.set(0, 7.2, 16);
   camera.lookAt(0, 3, 0);
 
-  // Resize & “low-res upscale” for crunchy look
+  // Low-res render upscale => crunchy pixels
   function resize(){
-    const w = window.innerWidth, h = window.innerHeight;
+    const w = innerWidth, h = innerHeight;
     camera.aspect = w/h; camera.updateProjectionMatrix();
-    // render at lower res to get chunky pixels
-    const scale = 0.6; // smaller = chunkier
+    const scale = 0.55; // smaller = chunkier
     renderer.setSize(Math.floor(w*scale), Math.floor(h*scale), false);
     renderer.domElement.style.width  = w+'px';
     renderer.domElement.style.height = h+'px';
   }
-  window.addEventListener('resize', resize); resize();
+  addEventListener('resize', resize); resize();
 
-  // Lights (simple, like PS1)
-  const amb = new THREE.AmbientLight(0xffffff, 0.55);
-  const dir = new THREE.DirectionalLight(0xffffff, 0.75); dir.position.set(1,2,1);
+  // Lighting — cheap & flat-ish
+  const amb = new THREE.AmbientLight(0xbfd6ff, 0.55);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.85);
+  dir.position.set(-0.7, 1.2, 0.6);
   scene.add(amb, dir);
 
-  // Ground (simple grid-ish jungle floor color)
-  const groundGeo = new THREE.PlaneGeometry(200, 60, 1, 1);
-  const groundMat = new THREE.MeshLambertMaterial({ color: 0x1e6b2a });
-  const ground = new THREE.Mesh(groundGeo, groundMat);
-  ground.rotation.x = -Math.PI/2;
-  ground.position.y = 0;
-  scene.add(ground);
+  // Ground — low-poly with “checker” vertex colors to fake texture
+  function makeGround(){
+    const geo = new THREE.PlaneGeometry(200, 80, 16, 6);
+    geo.rotateX(-Math.PI/2);
+    // vertex colors checker
+    const cols = [];
+    for (let i=0;i<geo.attributes.position.count;i++){
+      const vx = i% (17); // 16 segments => 17 verts per row
+      const vz = Math.floor(i/17);
+      const odd = (vx+vz)%2===0;
+      const c = odd ? new THREE.Color(0x1c6b2d) : new THREE.Color(0x185b26);
+      cols.push(c.r, c.g, c.b);
+    }
+    geo.setAttribute('color', new THREE.Float32BufferAttribute(new Float32Array(cols),3));
+    const mat = new THREE.MeshLambertMaterial({ vertexColors:true, fog:true });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.y = 0;
+    return mesh;
+  }
+  scene.add(makeGround());
 
-  // Fake “trees” as low-poly cones + cylinders
+  // Tree rows — low-poly cylinders + cones, repeated in z
   const trees = new THREE.Group();
   scene.add(trees);
   function addTree(x,z){
     const trunk = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.3, 0.5, 4, 6),
+      new THREE.CylinderGeometry(0.35, 0.5, 4, 6),
       new THREE.MeshLambertMaterial({ color: 0x6b3e17 })
     );
     trunk.position.set(x, 2, z);
     const crown = new THREE.Mesh(
-      new THREE.ConeGeometry(2.2, 3.2, 7),
+      new THREE.ConeGeometry(2.4, 3.0, 7),
       new THREE.MeshLambertMaterial({ color: 0x1b8b3a, flatShading:true })
     );
     crown.position.set(x, 5, z);
     trees.add(trunk, crown);
   }
-  [-8,-4,0,4,8].forEach(x => addTree(x, -8));
+  const lanes = [-9,-6,-3,0,3,6,9];
+  for (let rz=-18; rz>=-54; rz-=6){
+    lanes.forEach(x => addTree(x, rz + (Math.random()*1-0.5)));
+  }
 
-  // Monkey (low-poly “capsule” look). You can swap to your sprite later.
-  const monkey = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.BoxGeometry(1.2, 1.6, 0.8),
-    new THREE.MeshLambertMaterial({ color: 0x2d63ff, flatShading:true })
-  );
-  const head = new THREE.Mesh(
-    new THREE.BoxGeometry(1.2, 1.0, 1.0),
-    new THREE.MeshLambertMaterial({ color: 0x2d63ff, flatShading:true })
-  );
-  head.position.y = 1.6;
-  monkey.add(body, head);
+  // Low-poly “PS1” monkey model (boxes + capsules + tail)
+  function makeMonkey(){
+    const g = new THREE.Group();
+    const blue = 0x2d63ff, face = 0xffe1a8;
+    const body = new THREE.Mesh(new THREE.BoxGeometry(1.2,1.6,0.8,1,1,1),
+                                new THREE.MeshLambertMaterial({ color: blue, flatShading:true }));
+    const head = new THREE.Mesh(new THREE.BoxGeometry(1.2,1.0,1.0,1,1,1),
+                                new THREE.MeshLambertMaterial({ color: blue, flatShading:true }));
+    head.position.y = 1.6;
+
+    const facePatch = new THREE.Mesh(new THREE.BoxGeometry(0.8,0.5,0.1),
+                                     new THREE.MeshLambertMaterial({ color: face, flatShading:true }));
+    facePatch.position.set(0,1.7,0.56);
+
+    function limb(w,h,dx,dy,dz){
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w,h,0.6,1,1,1),
+                               new THREE.MeshLambertMaterial({ color: blue, flatShading:true }));
+      m.position.set(dx, dy, dz);
+      return m;
+    }
+    const armL = limb(0.35,0.9,-0.7,0.6,0);
+    const armR = limb(0.35,0.9, 0.7,0.6,0);
+    const legL = limb(0.45,0.9,-0.35,-0.35,0);
+    const legR = limb(0.45,0.9, 0.35,-0.35,0);
+
+    // Tail (bent tube)
+    const tail = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.12, 1.2, 2, 6),
+      new THREE.MeshLambertMaterial({ color: blue, flatShading:true })
+    );
+    tail.position.set(0.6,0.4,-0.2);
+    tail.rotation.z = Math.PI/2.4;
+
+    g.add(body, head, facePatch, armL, armR, legL, legR, tail);
+    return g;
+  }
+  const monkey = makeMonkey();
   monkey.position.set(0, 1, 0);
   scene.add(monkey);
 
-  // Bananas (low-poly wedges)
+  // Bent low-poly banana
   function makeBanana(){
-    const geo = new THREE.CapsuleGeometry(0.18, 0.5, 2, 6);
-    const mat = new THREE.MeshLambertMaterial({ color: 0xffd24d, flatShading:true });
-    const m = new THREE.Mesh(geo, mat);
-    m.rotation.z = Math.PI/2;
+    const m = new THREE.Group();
+    const segs = 6;
+    const yellow = new THREE.MeshLambertMaterial({ color: 0xffd24d, flatShading:true });
+    // three capsules to fake a curve
+    const cap = r => new THREE.Mesh(new THREE.CapsuleGeometry(0.16, 0.42, 2, segs), yellow);
+    const a = cap(), b = cap(), c = cap();
+    a.rotation.z =  Math.PI/2.0;
+    b.rotation.z =  Math.PI/2.0; b.rotation.y =  0.25;
+    c.rotation.z =  Math.PI/2.0; c.rotation.y = -0.25;
+    a.position.set(-0.35,0,0); b.position.set(0,0,0); c.position.set(0.35,0,0);
+    m.add(a,b,c);
     return m;
   }
 
-  // Spawn points above trees (so it looks like dropping from trees)
-  const spawnXs = [-8,-4,0,4,8];
-
+  // Spawn above back tree line, drift forward
+  const spawnXs = [-9,-6,-3,0,3,6,9];
   const bananas = [];
   let nextSpawn = 0;
+
   let t=0, score=0, timeLeft=30, playing=false, over=false;
 
   function reset(){
@@ -113,27 +161,26 @@
   reset();
 
   function spawnBanana(){
-    const x = spawnXs[Math.floor(Math.random()*spawnXs.length)] + (Math.random()*1.2-0.6);
-    const b = { mesh: makeBanana(), vy: 2.1 + Math.random()*1.2 };
-    b.mesh.position.set(x, 6.8, -8);
-    scene.add(b.mesh);
-    bananas.push(b);
+    const x = spawnXs[Math.floor(Math.random()*spawnXs.length)] + (Math.random()*0.8-0.4);
+    const b = { mesh: makeBanana(), vy: 2.0 + Math.random()*1.0, vz: 0.06 + Math.random()*0.02 };
+    b.mesh.position.set(x, 6.8, -10);
+    b.mesh.rotation.y = Math.random()*Math.PI*2;
+    scene.add(b.mesh); bananas.push(b);
   }
 
-  // Touch/drag to move
+  // Input (drag/keys)
   function pointer(e){
     const clientX = (e.touches? e.touches[0].clientX : e.clientX);
-    const nx = (clientX / window.innerWidth)*2 - 1; // -1..1
-    // Map to lane width ~ 10 units
-    monkey.position.x = THREE.MathUtils.clamp(nx * 9, -9.5, 9.5);
+    const nx = (clientX / innerWidth)*2 - 1; // -1..1
+    monkey.position.x = THREE.MathUtils.clamp(nx * 9.5, -9.5, 9.5);
     if (!playing && !over) playing = true;
     e.preventDefault();
   }
   renderer.domElement.addEventListener('pointerdown', pointer);
   renderer.domElement.addEventListener('pointermove', e => { if (playing) pointer(e); }, {passive:false});
-  window.addEventListener('keydown', e=>{
+  addEventListener('keydown', e=>{
     if (!playing && !over && (e.code==='Space'||e.code==='Enter')) playing = true;
-    const step = 1.2;
+    const step = 1.1;
     if (playing){
       if (e.code==='ArrowLeft')  monkey.position.x = Math.max(-9.5, monkey.position.x - step);
       if (e.code==='ArrowRight') monkey.position.x = Math.min( 9.5, monkey.position.x + step);
@@ -142,7 +189,7 @@
     }
   });
 
-  // Collision (simple AABB around monkey)
+  // Collision (simple)
   function caught(b){
     const dx = Math.abs(b.mesh.position.x - monkey.position.x);
     const dz = Math.abs(b.mesh.position.z - monkey.position.z);
@@ -150,9 +197,9 @@
     return dx < 0.9 && dz < 1.1 && dy < 1.2;
   }
 
-  // PS1-ish jitter: snap world positions to a coarse grid to mimic affine/vertex wobble
+  // PS1-ish vertex snap wobble
   function ps1Snap(obj){
-    const s = 1/64; // snap step (bigger = more wobble)
+    const s = 1/64; // bigger = more wobble
     obj.position.x = Math.round(obj.position.x / s) * s;
     obj.position.y = Math.round(obj.position.y / s) * s;
     obj.position.z = Math.round(obj.position.z / s) * s;
@@ -162,42 +209,36 @@
   const hud = document.getElementById('hud');
   function setHud(){
     if (over) hud.textContent = `Time! Score: ${score} — tap to replay`;
-    else if (!playing) hud.textContent = 'Drag to move • Catch bananas • 30s';
+    else if (!playing) hud.textContent = 'Drag/Arrows to move • Catch bananas • 30s';
     else hud.textContent = `Score: ${score} • Time: ${Math.max(0,timeLeft).toFixed(1)}`;
   }
 
-  // Loop
+  // Main loop
   function tick(){
     requestAnimationFrame(tick);
 
     if (playing && !over){
-      if (t >= nextSpawn){ spawnBanana(); nextSpawn = t + Math.floor(30 + Math.random()*20); }
-      // fall + move toward player z
+      if (t >= nextSpawn){ spawnBanana(); nextSpawn = t + Math.floor(26 + Math.random()*18); }
       bananas.forEach(b=>{
         b.mesh.position.y -= b.vy * 0.03;
-        b.mesh.position.z += 0.06; // drift toward camera
-        b.mesh.rotation.y += 0.02;
+        b.mesh.position.z += b.vz;
+        b.mesh.rotation.y += 0.03;
       });
-      // collect / cleanup
       for (let i=bananas.length-1;i>=0;i--){
         const b = bananas[i];
         if (caught(b)){ score++; scene.remove(b.mesh); bananas.splice(i,1); continue; }
-        if (b.mesh.position.y < 0.4){ // hit ground -> remove (missed)
-          scene.remove(b.mesh); bananas.splice(i,1);
-        }
+        if (b.mesh.position.y < 0.4){ scene.remove(b.mesh); bananas.splice(i,1); }
       }
-      // timer
+
       if (t % 60 === 0) timeLeft -= 1;
       if (timeLeft <= 0){ over = true; playing = false; }
       t++;
     }
 
-    // PS1-ish jitter
+    // PS1-ish touches
     ps1Snap(monkey);
     bananas.forEach(b => ps1Snap(b.mesh));
-
-    // slight camera bob for retro feel
-    camera.position.y = 7.5 + Math.sin(t*0.03)*0.15;
+    camera.position.y = 7.2 + Math.sin(t*0.025)*0.14; // subtle bob
 
     renderer.render(scene, camera);
     setHud();
