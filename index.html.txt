@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Blue Monkey</title>
+  <style>
+    body {
+      background-color: black;
+      color: #00aaff;
+      text-align: center;
+      font-family: Arial, sans-serif;
+    }
+    img {
+      max-width: 80%;
+      height: auto;
+      margin-top: 40px;
+    }
+    a {
+      display: block;
+      margin-top: 20px;
+      font-size: 24px;
+      color: #00aaff;
+      text-decoration: none;
+    }
+    a:hover {
+      color: #55ccff;
+    }
+  </style>
+</head>
+<body>
+  <h1>Blue Monkey</h1>
+  <img src="blue-monkey.PNG" alt="Blue Monkey">
+  <a href="banana.html">Enter</a>
+</body>
+</html>
