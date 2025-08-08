@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Blue Monkey — Catch!</title>
+<title>Banana Blitz</title>
 <style>
   html,body{margin:0;height:100%;background:#000;font-family:system-ui,Arial}
   #wrap{display:flex;align-items:center;justify-content:center;height:100%}
-  canvas{background:#5ec0ff;display:block;touch-action:none}
+  canvas{display:block;touch-action:none;background:#1b1b1b}
   #hud{position:fixed;top:10px;left:0;right:0;text-align:center;color:#fff;
        font-weight:600;text-shadow:0 1px 3px #000}
 </style>
@@ -17,150 +17,139 @@
 <div id="wrap"><canvas id="c" width="480" height="270"></canvas></div>
 
 <script>
-(() => {
+(()=> {
   const c = document.getElementById('c');
   const ctx = c.getContext('2d', { alpha:false });
 
-  // fit to screen while keeping aspect
+  // Fit canvas to screen while keeping aspect
   function fit(){
     const s = Math.min(innerWidth/c.width, innerHeight/c.height);
-    c.style.width = (c.width*s) + 'px';
-    c.style.height = (c.height*s) + 'px';
+    c.style.width  = (c.width*s)+'px';
+    c.style.height = (c.height*s)+'px';
   }
   addEventListener('resize', fit); fit();
 
-  const GROUND_Y = 220;
+  // --- Assets (NOTE the CAPITAL .PNG filenames) ---
+  const bg  = new Image(); bg.src  = 'Jungle.PNG?v=1';          // upload as Jungle.PNG
+  const monk= new Image(); monk.src= 'blue-monkey.PNG?v=1';     // already in your repo
+  const ban = new Image(); ban.src = 'banana.PNG?v=2';          // your banana image
 
-  // Load images (uses your repo filenames)
-  const monkeyImg = new Image(); monkeyImg.src = 'blue-monkey.PNG?v=1';
-  const bananaImg = new Image(); bananaImg.src = 'banana.PNG?v=1';
+  // World
+  const GROUND_Y = 220;               // where the jungle floor is drawn
+  const player = { x:c.width/2-22, y:GROUND_Y-48, w:44, h:48 }; // monkey size
 
-  const player = { x: c.width/2, y: GROUND_Y-40, w: 44, h: 44, speed: 6 };
+  // “Trees” to drop from (x positions visually line up with top canopy)
+  const trees = [50, 140, 230, 320, 410];   // banana spawns come from near these x's
+  const treeTopY = 18;                      // high up in the canopy
 
+  // Game state
   let bananas = [];
-  let t = 0, nextSpawn = 0;
-  let running = false, over = false;
-  let score = 0, timeLeft = 30;
+  let t=0, nextSpawn=0;
+  let running=false, over=false;
+  let score=0, timeLeft=30;
 
   function reset(){
-    bananas = [];
-    t = 0; nextSpawn = 0;
-    score = 0; timeLeft = 30;
-    over = false; running = false;
+    bananas.length = 0;
+    t=0; nextSpawn=0; score=0; timeLeft=30; running=false; over=false;
   }
   reset();
 
-  // Input — drag or tap to set X
+  // Input — drag/touch to move left/right
   function pointer(e){
-    const rect = c.getBoundingClientRect();
-    const px = (e.touches ? e.touches[0].clientX : e.clientX) - rect.left;
-    // convert to canvas coords
-    const scale = c.width / rect.width;
+    const r = c.getBoundingClientRect();
+    const px = (e.touches? e.touches[0].clientX : e.clientX) - r.left;
+    const scale = c.width / r.width;
     player.x = Math.max(0, Math.min(c.width - player.w, px*scale - player.w/2));
-    if (!running && !over){ running = true; } // start on first touch
+    if (!running && !over) running = true;
   }
   c.addEventListener('pointerdown', pointer);
   c.addEventListener('pointermove', e => { if (running) pointer(e); });
-  addEventListener('keydown', e => {
+
+  addEventListener('keydown', e=>{
+    const step=24;
     if (!running && !over && (e.code==='Space'||e.code==='Enter')) running=true;
-    const step = 30;
     if (running){
-      if (e.code==='ArrowLeft')  player.x = Math.max(0, player.x-step);
-      if (e.code==='ArrowRight') player.x = Math.min(c.width-player.w, player.x+step);
+      if (e.code==='ArrowLeft')  player.x=Math.max(0, player.x-step);
+      if (e.code==='ArrowRight') player.x=Math.min(c.width-player.w, player.x+step);
     }
   });
 
   // helpers
-  function rand(a,b){ return Math.random()*(b-a)+a; }
+  const rand=(a,b)=>Math.random()*(b-a)+a;
+  const overlap=(a,b)=>a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y;
+
   function spawnBanana(){
+    const baseX = trees[Math.floor(Math.random()*trees.length)];
     const size = 28;
     bananas.push({
-      x: rand(10, c.width-10-size),
-      y: -size,
+      x: baseX + rand(-20,20),
+      y: treeTopY,
       w: size, h: size,
-      vy: rand(2.2, 3.8),
+      vy: rand(2.2, 3.6),
       caught:false
     });
   }
-  function rectsOverlap(a,b){
-    return a.x < b.x+b.w && a.x+a.w > b.x && a.y < b.y+b.h && a.y+a.h > b.y;
+
+  function drawBackground(){
+    if (bg.complete && bg.naturalWidth){
+      ctx.drawImage(bg, 0, 0, c.width, c.height);
+    } else {
+      // fallback colors if image hasn't loaded yet
+      ctx.fillStyle='#5ec0ff'; ctx.fillRect(0,0,c.width,GROUND_Y);
+      ctx.fillStyle='#2bbd00'; ctx.fillRect(0,GROUND_Y,c.width,c.height-GROUND_Y);
+    }
+    // subtle tree crowns so it looks like they drop from trees even before bg loads
+    ctx.fillStyle='rgba(0,100,0,0.35)';
+    trees.forEach(x=>{
+      ctx.beginPath();
+      ctx.ellipse(x, treeTopY+8, 26, 12, 0, 0, Math.PI*2);
+      ctx.fill();
+    });
   }
 
-  function drawGround(){
-    ctx.fillStyle = '#2bbd00';
-    ctx.fillRect(0,GROUND_Y,c.width,c.height-GROUND_Y);
-  }
   function drawMonkey(){
-    const m = player;
-    if (monkeyImg.complete && monkeyImg.naturalWidth){
-      ctx.drawImage(monkeyImg, m.x, m.y, m.w, m.h);
+    if (monk.complete && monk.naturalWidth){
+      ctx.drawImage(monk, player.x, player.y, player.w, player.h);
     } else {
-      // fallback box if image hasn’t loaded yet
-      ctx.fillStyle = '#1579ff';
-      ctx.fillRect(m.x, m.y, m.w, m.h);
+      ctx.fillStyle='#1579ff'; ctx.fillRect(player.x, player.y, player.w, player.h);
     }
   }
+
   function drawBanana(b){
-    if (bananaImg.complete && bananaImg.naturalWidth){
-      ctx.drawImage(bananaImg, b.x, b.y, b.w, b.h);
+    if (ban.complete && ban.naturalWidth){
+      ctx.drawImage(ban, b.x, b.y, b.w, b.h);
     } else {
-      ctx.fillStyle = '#ffd34d';
-      ctx.beginPath();
-      ctx.ellipse(b.x+b.w/2, b.y+b.h/2, b.w/2, b.h/3, 0, 0, Math.PI*2);
-      ctx.fill();
+      ctx.fillStyle='#ffd34d';
+      ctx.beginPath(); ctx.ellipse(b.x+b.w/2, b.y+b.h/2, b.w/2, b.h/3, 0, 0, Math.PI*2); ctx.fill();
     }
   }
 
   function drawHUD(){
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 16px system-ui, Arial';
-    ctx.textAlign = 'left';
-    ctx.fillText('Score: ' + score, 10, 20);
-    ctx.textAlign = 'right';
-    ctx.fillText('Time: ' + Math.max(0, timeLeft).toFixed(1), c.width-10, 20);
-
-    if (over){
-      ctx.textAlign = 'center';
-      ctx.font = 'bold 18px system-ui, Arial';
-      ctx.fillText('Time! Score: '+score+' — tap to play again', c.width/2, 60);
-    } else if (!running){
-      ctx.textAlign = 'center';
-      ctx.fillText('Drag to move • Catch bananas!', c.width/2, 60);
-    }
+    ctx.fillStyle='#fff'; ctx.font='bold 16px system-ui,Arial';
+    ctx.textAlign='left';  ctx.fillText('Score: '+score, 10, 20);
+    ctx.textAlign='right'; ctx.fillText('Time: '+Math.max(0,timeLeft).toFixed(1), c.width-10, 20);
+    if (over){ ctx.textAlign='center'; ctx.fillText('Time! Score: '+score+' — tap to play again', c.width/2, 50); }
+    else if (!running){ ctx.textAlign='center'; ctx.fillText('Drag to move • Catch bananas!', c.width/2, 50); }
   }
 
-  c.addEventListener('pointerdown', () => {
-    if (over){ reset(); running = true; }
-  });
+  c.addEventListener('pointerdown', ()=>{ if (over){ reset(); running=true; } });
 
-  // main loop
   function step(){
     requestAnimationFrame(step);
     ctx.clearRect(0,0,c.width,c.height);
 
     if (running && !over){
-      // spawn bananas
-      if (t >= nextSpawn){
-        spawnBanana();
-        nextSpawn = t + Math.floor(rand(25, 45)); // spawn cadence
-      }
-      // move bananas
-      bananas.forEach(b => { b.y += b.vy; });
+      if (t>=nextSpawn){ spawnBanana(); nextSpawn = t + Math.floor(rand(20,40)); }
+      bananas.forEach(b=>{ b.y += b.vy; });
+      bananas.forEach(b=>{ if (!b.caught && overlap(player,b)){ b.caught=true; score++; } });
+      bananas = bananas.filter(b => !b.caught && b.y < GROUND_Y-4);
 
-      // catch or remove
-      bananas.forEach(b => {
-        if (!b.caught && rectsOverlap(player,b)){ b.caught = true; score++; }
-      });
-      bananas = bananas.filter(b => !b.caught && b.y < GROUND_Y - 4);
-
-      // timer
-      if (t % 60 === 0) timeLeft -= 1;
-      if (timeLeft <= 0){ over = true; running = false; }
+      if (t%60===0) timeLeft -= 1;
+      if (timeLeft<=0){ over=true; running=false; }
       t++;
     }
 
-    // draw
-    drawGround();
+    drawBackground();
     bananas.forEach(drawBanana);
     drawMonkey();
     drawHUD();
