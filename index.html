@@ -3,181 +3,211 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Blue Monkey</title>
+<title>Blue Monkey 3D (PS1 style)</title>
 <style>
-  html,body{margin:0;height:100%;background:#000;font-family:system-ui,Arial}
-  #wrap{display:flex;align-items:center;justify-content:center;height:100%}
-  canvas{display:block;touch-action:none;background:#111}
-  #hud{position:fixed;top:10px;left:0;right:0;text-align:center;color:#fff;
-       font-weight:600;text-shadow:0 1px 3px #000}
+  html,body{margin:0;height:100%;background:#000;overflow:hidden;font-family:system-ui,Arial}
+  #hud{position:fixed;top:8px;left:0;right:0;text-align:center;color:#fff;font-weight:700;text-shadow:0 1px 2px #000}
+  canvas{touch-action:none;image-rendering: pixelated;}
 </style>
 </head>
 <body>
-<div id="hud"></div>
-<div id="wrap"><canvas id="c" width="480" height="270"></canvas></div>
+<div id="hud">Drag to move • Catch bananas • 30s</div>
+<canvas id="game"></canvas>
+
+<!-- Three.js from CDN -->
+<script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
 
 <script>
 (() => {
-  const c = document.getElementById('c');
-  const ctx = c.getContext('2d', { alpha:false });
+  const canvas = document.getElementById('game');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias:false, powerPreference:'low-power' });
+  renderer.setClearColor(0x1a1f2b, 1);
 
-  function fit(){
-    const s = Math.min(innerWidth/c.width, innerHeight/c.height);
-    c.style.width = (c.width*s)+'px';
-    c.style.height = (c.height*s)+'px';
+  const scene = new THREE.Scene();
+
+  // Camera — PS1-ish narrow FOV
+  const camera = new THREE.PerspectiveCamera(55, 1, 0.1, 200);
+  camera.position.set(0, 7.5, 16);
+  camera.lookAt(0, 3, 0);
+
+  // Resize & “low-res upscale” for crunchy look
+  function resize(){
+    const w = window.innerWidth, h = window.innerHeight;
+    camera.aspect = w/h; camera.updateProjectionMatrix();
+    // render at lower res to get chunky pixels
+    const scale = 0.6; // smaller = chunkier
+    renderer.setSize(Math.floor(w*scale), Math.floor(h*scale), false);
+    renderer.domElement.style.width  = w+'px';
+    renderer.domElement.style.height = h+'px';
   }
-  addEventListener('resize', fit); fit();
+  window.addEventListener('resize', resize); resize();
 
-  // --- IMAGES (case-sensitive names) ---
-  const titleImg = new Image();  titleImg.src  = 'blue-monkey.PNG?v=1';
-  const bgImg    = new Image();  bgImg.src    = 'Jungle.png?v=2'; // your newer jungle image
-  const bananaImg= new Image();  bananaImg.src= 'banana.PNG?v=2';
+  // Lights (simple, like PS1)
+  const amb = new THREE.AmbientLight(0xffffff, 0.55);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.75); dir.position.set(1,2,1);
+  scene.add(amb, dir);
 
-  // Try transparent in-game sprite first; if missing, fall back to title image
-  const playerImg= new Image();
-  playerImg.onerror = () => { playerImg.src = 'blue-monkey.PNG?v=1'; };
-  playerImg.src = 'player.PNG?v=1';
+  // Ground (simple grid-ish jungle floor color)
+  const groundGeo = new THREE.PlaneGeometry(200, 60, 1, 1);
+  const groundMat = new THREE.MeshLambertMaterial({ color: 0x1e6b2a });
+  const ground = new THREE.Mesh(groundGeo, groundMat);
+  ground.rotation.x = -Math.PI/2;
+  ground.position.y = 0;
+  scene.add(ground);
 
-  // --- STATE ---
-  let state = 'title';   // 'title' | 'play' | 'over'
-  const GROUND_Y = 220;
+  // Fake “trees” as low-poly cones + cylinders
+  const trees = new THREE.Group();
+  scene.add(trees);
+  function addTree(x,z){
+    const trunk = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.3, 0.5, 4, 6),
+      new THREE.MeshLambertMaterial({ color: 0x6b3e17 })
+    );
+    trunk.position.set(x, 2, z);
+    const crown = new THREE.Mesh(
+      new THREE.ConeGeometry(2.2, 3.2, 7),
+      new THREE.MeshLambertMaterial({ color: 0x1b8b3a, flatShading:true })
+    );
+    crown.position.set(x, 5, z);
+    trees.add(trunk, crown);
+  }
+  [-8,-4,0,4,8].forEach(x => addTree(x, -8));
 
-  // player
-  const player = { x:c.width/2-22, y:GROUND_Y-48, w:44, h:48 };
+  // Monkey (low-poly “capsule” look). You can swap to your sprite later.
+  const monkey = new THREE.Group();
+  const body = new THREE.Mesh(
+    new THREE.BoxGeometry(1.2, 1.6, 0.8),
+    new THREE.MeshLambertMaterial({ color: 0x2d63ff, flatShading:true })
+  );
+  const head = new THREE.Mesh(
+    new THREE.BoxGeometry(1.2, 1.0, 1.0),
+    new THREE.MeshLambertMaterial({ color: 0x2d63ff, flatShading:true })
+  );
+  head.position.y = 1.6;
+  monkey.add(body, head);
+  monkey.position.set(0, 1, 0);
+  scene.add(monkey);
 
-  // trees (spawn points)
-  const trees = [50, 140, 230, 320, 410];
-  const treeTopY = 18;
+  // Bananas (low-poly wedges)
+  function makeBanana(){
+    const geo = new THREE.CapsuleGeometry(0.18, 0.5, 2, 6);
+    const mat = new THREE.MeshLambertMaterial({ color: 0xffd24d, flatShading:true });
+    const m = new THREE.Mesh(geo, mat);
+    m.rotation.z = Math.PI/2;
+    return m;
+  }
 
-  // game vars
-  let bananas = [];
-  let t=0, nextSpawn=0, score=0, timeLeft=30;
+  // Spawn points above trees (so it looks like dropping from trees)
+  const spawnXs = [-8,-4,0,4,8];
 
-  function resetGame(){
+  const bananas = [];
+  let nextSpawn = 0;
+  let t=0, score=0, timeLeft=30, playing=false, over=false;
+
+  function reset(){
+    bananas.forEach(b => scene.remove(b.mesh));
     bananas.length = 0;
-    t=0; nextSpawn=0; score=0; timeLeft=30;
-    state = 'play';
+    monkey.position.x = 0;
+    score = 0; timeLeft = 30; t = 0; nextSpawn = 0; playing=false; over=false;
   }
-
-  // input
-  function toCanvasX(clientX){
-    const r = c.getBoundingClientRect();
-    const scale = c.width / r.width;
-    return (clientX - r.left) * scale;
-  }
-  function pointer(e){
-    const x = toCanvasX((e.touches? e.touches[0].clientX : e.clientX));
-    player.x = Math.max(0, Math.min(c.width-player.w, x - player.w/2));
-  }
-  c.addEventListener('pointerdown', (e)=>{
-    if (state==='title'){ resetGame(); }
-    else if (state==='over'){ state='title'; } // back to title on tap
-    pointer(e);
-  });
-  c.addEventListener('pointermove', (e)=>{ if (state==='play') pointer(e); });
-  addEventListener('keydown', (e)=>{
-    const step=24;
-    if (state==='title' && (e.code==='Space'||e.code==='Enter')) resetGame();
-    else if (state==='over'  && (e.code==='Space'||e.code==='Enter')) state='title';
-    else if (state==='play'){
-      if (e.code==='ArrowLeft')  player.x=Math.max(0, player.x-step);
-      if (e.code==='ArrowRight') player.x=Math.min(c.width-player.w, player.x+step);
-    }
-  });
-
-  // helpers
-  const rand=(a,b)=>Math.random()*(b-a)+a;
-  const overlap=(a,b)=>a.x<b.x+b.w && a.x+a.w>b.x && a.y<b.y+b.h && a.y+a.h>b.y;
+  reset();
 
   function spawnBanana(){
-    const baseX = trees[Math.floor(Math.random()*trees.length)];
-    const size = 28;
-    bananas.push({ x: baseX+rand(-20,20), y:treeTopY, w:size, h:size, vy:rand(2.2,3.6), caught:false });
+    const x = spawnXs[Math.floor(Math.random()*spawnXs.length)] + (Math.random()*1.2-0.6);
+    const b = { mesh: makeBanana(), vy: 2.1 + Math.random()*1.2 };
+    b.mesh.position.set(x, 6.8, -8);
+    scene.add(b.mesh);
+    bananas.push(b);
   }
 
-  function drawBG(){
-    if (bgImg.complete && bgImg.naturalWidth){
-      ctx.drawImage(bgImg, 0, 0, c.width, c.height);
-    } else {
-      ctx.fillStyle='#5ec0ff'; ctx.fillRect(0,0,c.width,GROUND_Y);
-      ctx.fillStyle='#2bbd00'; ctx.fillRect(0,GROUND_Y,c.width,c.height-GROUND_Y);
+  // Touch/drag to move
+  function pointer(e){
+    const clientX = (e.touches? e.touches[0].clientX : e.clientX);
+    const nx = (clientX / window.innerWidth)*2 - 1; // -1..1
+    // Map to lane width ~ 10 units
+    monkey.position.x = THREE.MathUtils.clamp(nx * 9, -9.5, 9.5);
+    if (!playing && !over) playing = true;
+    e.preventDefault();
+  }
+  renderer.domElement.addEventListener('pointerdown', pointer);
+  renderer.domElement.addEventListener('pointermove', e => { if (playing) pointer(e); }, {passive:false});
+  window.addEventListener('keydown', e=>{
+    if (!playing && !over && (e.code==='Space'||e.code==='Enter')) playing = true;
+    const step = 1.2;
+    if (playing){
+      if (e.code==='ArrowLeft')  monkey.position.x = Math.max(-9.5, monkey.position.x - step);
+      if (e.code==='ArrowRight') monkey.position.x = Math.min( 9.5, monkey.position.x + step);
+    } else if (over && (e.code==='Space'||e.code==='Enter')) {
+      reset();
     }
-    // canopy hints (in case bg isn't loaded yet)
-    ctx.fillStyle='rgba(0,100,0,0.35)';
-    trees.forEach(x=>{
-      ctx.beginPath(); ctx.ellipse(x, treeTopY+8, 26, 12, 0, 0, Math.PI*2); ctx.fill();
-    });
+  });
+
+  // Collision (simple AABB around monkey)
+  function caught(b){
+    const dx = Math.abs(b.mesh.position.x - monkey.position.x);
+    const dz = Math.abs(b.mesh.position.z - monkey.position.z);
+    const dy = Math.abs(b.mesh.position.y - 1.0);
+    return dx < 0.9 && dz < 1.1 && dy < 1.2;
   }
 
-  function drawPlayer(){
-    if (playerImg.complete && playerImg.naturalWidth){
-      ctx.drawImage(playerImg, player.x, player.y, player.w, player.h);
-    } else {
-      ctx.fillStyle='#1579ff'; ctx.fillRect(player.x, player.y, player.w, player.h);
-    }
+  // PS1-ish jitter: snap world positions to a coarse grid to mimic affine/vertex wobble
+  function ps1Snap(obj){
+    const s = 1/64; // snap step (bigger = more wobble)
+    obj.position.x = Math.round(obj.position.x / s) * s;
+    obj.position.y = Math.round(obj.position.y / s) * s;
+    obj.position.z = Math.round(obj.position.z / s) * s;
   }
 
-  function drawBanana(b){
-    if (bananaImg.complete && bananaImg.naturalWidth){
-      ctx.drawImage(bananaImg, b.x, b.y, b.w, b.h);
-    } else {
-      ctx.fillStyle='#ffd34d';
-      ctx.beginPath(); ctx.ellipse(b.x+b.w/2, b.y+b.h/2, b.w/2, b.h/3, 0, 0, Math.PI*2); ctx.fill();
-    }
+  // HUD
+  const hud = document.getElementById('hud');
+  function setHud(){
+    if (over) hud.textContent = `Time! Score: ${score} — tap to replay`;
+    else if (!playing) hud.textContent = 'Drag to move • Catch bananas • 30s';
+    else hud.textContent = `Score: ${score} • Time: ${Math.max(0,timeLeft).toFixed(1)}`;
   }
 
-  function drawTitle(){
-    // bg
-    ctx.fillStyle='#000'; ctx.fillRect(0,0,c.width,c.height);
-    // title text
-    ctx.fillStyle='#35a8ff'; ctx.font='bold 28px system-ui,Arial';
-    ctx.textAlign='center'; ctx.fillText('Blue Monkey', c.width/2, 50);
-    // title image
-    const w=160, h=160;
-    if (titleImg.complete && titleImg.naturalWidth){
-      ctx.drawImage(titleImg, c.width/2 - w/2, 70, w, h);
-    }
-    // Enter prompt
-    ctx.fillStyle='#35a8ff'; ctx.font='bold 18px system-ui,Arial';
-    ctx.fillText('Enter', c.width/2, 250);
-  }
+  // Loop
+  function tick(){
+    requestAnimationFrame(tick);
 
-  function drawHUD(){
-    ctx.fillStyle='#fff'; ctx.font='bold 16px system-ui,Arial';
-    ctx.textAlign='left';  ctx.fillText('Score: '+score, 10, 20);
-    ctx.textAlign='right'; ctx.fillText('Time: '+Math.max(0,timeLeft).toFixed(1), c.width-10, 20);
-    if (state==='over'){
-      ctx.textAlign='center';
-      ctx.fillText('Time! Score: '+score+' — tap to return', c.width/2, 50);
-    }
-  }
-
-  function loop(){
-    requestAnimationFrame(loop);
-    ctx.clearRect(0,0,c.width,c.height);
-
-    if (state==='title'){
-      drawTitle();
-      return;
-    }
-
-    // GAME
-    if (state==='play'){
-      if (t>=nextSpawn){ spawnBanana(); nextSpawn = t + Math.floor(rand(20,40)); }
-      bananas.forEach(b=> b.y += b.vy);
-      bananas.forEach(b=>{ if (!b.caught && overlap(player,b)){ b.caught=true; score++; } });
-      bananas = bananas.filter(b => !b.caught && b.y < GROUND_Y-4);
-      if (t%60===0) timeLeft -= 1;
-      if (timeLeft<=0){ state='over'; }
+    if (playing && !over){
+      if (t >= nextSpawn){ spawnBanana(); nextSpawn = t + Math.floor(30 + Math.random()*20); }
+      // fall + move toward player z
+      bananas.forEach(b=>{
+        b.mesh.position.y -= b.vy * 0.03;
+        b.mesh.position.z += 0.06; // drift toward camera
+        b.mesh.rotation.y += 0.02;
+      });
+      // collect / cleanup
+      for (let i=bananas.length-1;i>=0;i--){
+        const b = bananas[i];
+        if (caught(b)){ score++; scene.remove(b.mesh); bananas.splice(i,1); continue; }
+        if (b.mesh.position.y < 0.4){ // hit ground -> remove (missed)
+          scene.remove(b.mesh); bananas.splice(i,1);
+        }
+      }
+      // timer
+      if (t % 60 === 0) timeLeft -= 1;
+      if (timeLeft <= 0){ over = true; playing = false; }
       t++;
     }
 
-    drawBG();
-    bananas.forEach(drawBanana);
-    drawPlayer();
-    drawHUD();
+    // PS1-ish jitter
+    ps1Snap(monkey);
+    bananas.forEach(b => ps1Snap(b.mesh));
+
+    // slight camera bob for retro feel
+    camera.position.y = 7.5 + Math.sin(t*0.03)*0.15;
+
+    renderer.render(scene, camera);
+    setHud();
   }
-  loop();
+  tick();
+
+  // Restart on tap when over
+  renderer.domElement.addEventListener('pointerdown', ()=>{
+    if (over){ reset(); }
+  });
 })();
 </script>
 </body>
