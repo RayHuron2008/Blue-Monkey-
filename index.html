@@ -3,72 +3,83 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Banana Blitz</title>
+<title>Blue Monkey</title>
 <style>
   html,body{margin:0;height:100%;background:#000;font-family:system-ui,Arial}
   #wrap{display:flex;align-items:center;justify-content:center;height:100%}
-  canvas{display:block;touch-action:none;background:#1b1b1b}
+  canvas{display:block;touch-action:none;background:#111}
   #hud{position:fixed;top:10px;left:0;right:0;text-align:center;color:#fff;
        font-weight:600;text-shadow:0 1px 3px #000}
 </style>
 </head>
 <body>
-<div id="hud">Drag to move • Catch bananas • 30s</div>
+<div id="hud"></div>
 <div id="wrap"><canvas id="c" width="480" height="270"></canvas></div>
 
 <script>
-(()=> {
+(() => {
   const c = document.getElementById('c');
   const ctx = c.getContext('2d', { alpha:false });
 
-  // Fit canvas to screen while keeping aspect
   function fit(){
     const s = Math.min(innerWidth/c.width, innerHeight/c.height);
-    c.style.width  = (c.width*s)+'px';
+    c.style.width = (c.width*s)+'px';
     c.style.height = (c.height*s)+'px';
   }
   addEventListener('resize', fit); fit();
 
-  // --- Assets (NOTE the CAPITAL .PNG filenames) ---
-  const bg  = new Image(); bg.src  = 'Jungle.PNG?v=1';          // upload as Jungle.PNG
-  const monk= new Image(); monk.src= 'blue-monkey.PNG?v=1';     // already in your repo
-  const ban = new Image(); ban.src = 'banana.PNG?v=2';          // your banana image
+  // --- IMAGES (case-sensitive names) ---
+  const titleImg = new Image();  titleImg.src  = 'blue-monkey.PNG?v=1';
+  const bgImg    = new Image();  bgImg.src    = 'Jungle.png?v=2'; // your newer jungle image
+  const bananaImg= new Image();  bananaImg.src= 'banana.PNG?v=2';
 
-  // World
-  const GROUND_Y = 220;               // where the jungle floor is drawn
-  const player = { x:c.width/2-22, y:GROUND_Y-48, w:44, h:48 }; // monkey size
+  // Try transparent in-game sprite first; if missing, fall back to title image
+  const playerImg= new Image();
+  playerImg.onerror = () => { playerImg.src = 'blue-monkey.PNG?v=1'; };
+  playerImg.src = 'player.PNG?v=1';
 
-  // “Trees” to drop from (x positions visually line up with top canopy)
-  const trees = [50, 140, 230, 320, 410];   // banana spawns come from near these x's
-  const treeTopY = 18;                      // high up in the canopy
+  // --- STATE ---
+  let state = 'title';   // 'title' | 'play' | 'over'
+  const GROUND_Y = 220;
 
-  // Game state
+  // player
+  const player = { x:c.width/2-22, y:GROUND_Y-48, w:44, h:48 };
+
+  // trees (spawn points)
+  const trees = [50, 140, 230, 320, 410];
+  const treeTopY = 18;
+
+  // game vars
   let bananas = [];
-  let t=0, nextSpawn=0;
-  let running=false, over=false;
-  let score=0, timeLeft=30;
+  let t=0, nextSpawn=0, score=0, timeLeft=30;
 
-  function reset(){
+  function resetGame(){
     bananas.length = 0;
-    t=0; nextSpawn=0; score=0; timeLeft=30; running=false; over=false;
+    t=0; nextSpawn=0; score=0; timeLeft=30;
+    state = 'play';
   }
-  reset();
 
-  // Input — drag/touch to move left/right
-  function pointer(e){
+  // input
+  function toCanvasX(clientX){
     const r = c.getBoundingClientRect();
-    const px = (e.touches? e.touches[0].clientX : e.clientX) - r.left;
     const scale = c.width / r.width;
-    player.x = Math.max(0, Math.min(c.width - player.w, px*scale - player.w/2));
-    if (!running && !over) running = true;
+    return (clientX - r.left) * scale;
   }
-  c.addEventListener('pointerdown', pointer);
-  c.addEventListener('pointermove', e => { if (running) pointer(e); });
-
-  addEventListener('keydown', e=>{
+  function pointer(e){
+    const x = toCanvasX((e.touches? e.touches[0].clientX : e.clientX));
+    player.x = Math.max(0, Math.min(c.width-player.w, x - player.w/2));
+  }
+  c.addEventListener('pointerdown', (e)=>{
+    if (state==='title'){ resetGame(); }
+    else if (state==='over'){ state='title'; } // back to title on tap
+    pointer(e);
+  });
+  c.addEventListener('pointermove', (e)=>{ if (state==='play') pointer(e); });
+  addEventListener('keydown', (e)=>{
     const step=24;
-    if (!running && !over && (e.code==='Space'||e.code==='Enter')) running=true;
-    if (running){
+    if (state==='title' && (e.code==='Space'||e.code==='Enter')) resetGame();
+    else if (state==='over'  && (e.code==='Space'||e.code==='Enter')) state='title';
+    else if (state==='play'){
       if (e.code==='ArrowLeft')  player.x=Math.max(0, player.x-step);
       if (e.code==='ArrowRight') player.x=Math.min(c.width-player.w, player.x+step);
     }
@@ -81,80 +92,92 @@
   function spawnBanana(){
     const baseX = trees[Math.floor(Math.random()*trees.length)];
     const size = 28;
-    bananas.push({
-      x: baseX + rand(-20,20),
-      y: treeTopY,
-      w: size, h: size,
-      vy: rand(2.2, 3.6),
-      caught:false
-    });
+    bananas.push({ x: baseX+rand(-20,20), y:treeTopY, w:size, h:size, vy:rand(2.2,3.6), caught:false });
   }
 
-  function drawBackground(){
-    if (bg.complete && bg.naturalWidth){
-      ctx.drawImage(bg, 0, 0, c.width, c.height);
+  function drawBG(){
+    if (bgImg.complete && bgImg.naturalWidth){
+      ctx.drawImage(bgImg, 0, 0, c.width, c.height);
     } else {
-      // fallback colors if image hasn't loaded yet
       ctx.fillStyle='#5ec0ff'; ctx.fillRect(0,0,c.width,GROUND_Y);
       ctx.fillStyle='#2bbd00'; ctx.fillRect(0,GROUND_Y,c.width,c.height-GROUND_Y);
     }
-    // subtle tree crowns so it looks like they drop from trees even before bg loads
+    // canopy hints (in case bg isn't loaded yet)
     ctx.fillStyle='rgba(0,100,0,0.35)';
     trees.forEach(x=>{
-      ctx.beginPath();
-      ctx.ellipse(x, treeTopY+8, 26, 12, 0, 0, Math.PI*2);
-      ctx.fill();
+      ctx.beginPath(); ctx.ellipse(x, treeTopY+8, 26, 12, 0, 0, Math.PI*2); ctx.fill();
     });
   }
 
-  function drawMonkey(){
-    if (monk.complete && monk.naturalWidth){
-      ctx.drawImage(monk, player.x, player.y, player.w, player.h);
+  function drawPlayer(){
+    if (playerImg.complete && playerImg.naturalWidth){
+      ctx.drawImage(playerImg, player.x, player.y, player.w, player.h);
     } else {
       ctx.fillStyle='#1579ff'; ctx.fillRect(player.x, player.y, player.w, player.h);
     }
   }
 
   function drawBanana(b){
-    if (ban.complete && ban.naturalWidth){
-      ctx.drawImage(ban, b.x, b.y, b.w, b.h);
+    if (bananaImg.complete && bananaImg.naturalWidth){
+      ctx.drawImage(bananaImg, b.x, b.y, b.w, b.h);
     } else {
       ctx.fillStyle='#ffd34d';
       ctx.beginPath(); ctx.ellipse(b.x+b.w/2, b.y+b.h/2, b.w/2, b.h/3, 0, 0, Math.PI*2); ctx.fill();
     }
   }
 
+  function drawTitle(){
+    // bg
+    ctx.fillStyle='#000'; ctx.fillRect(0,0,c.width,c.height);
+    // title text
+    ctx.fillStyle='#35a8ff'; ctx.font='bold 28px system-ui,Arial';
+    ctx.textAlign='center'; ctx.fillText('Blue Monkey', c.width/2, 50);
+    // title image
+    const w=160, h=160;
+    if (titleImg.complete && titleImg.naturalWidth){
+      ctx.drawImage(titleImg, c.width/2 - w/2, 70, w, h);
+    }
+    // Enter prompt
+    ctx.fillStyle='#35a8ff'; ctx.font='bold 18px system-ui,Arial';
+    ctx.fillText('Enter', c.width/2, 250);
+  }
+
   function drawHUD(){
     ctx.fillStyle='#fff'; ctx.font='bold 16px system-ui,Arial';
     ctx.textAlign='left';  ctx.fillText('Score: '+score, 10, 20);
     ctx.textAlign='right'; ctx.fillText('Time: '+Math.max(0,timeLeft).toFixed(1), c.width-10, 20);
-    if (over){ ctx.textAlign='center'; ctx.fillText('Time! Score: '+score+' — tap to play again', c.width/2, 50); }
-    else if (!running){ ctx.textAlign='center'; ctx.fillText('Drag to move • Catch bananas!', c.width/2, 50); }
+    if (state==='over'){
+      ctx.textAlign='center';
+      ctx.fillText('Time! Score: '+score+' — tap to return', c.width/2, 50);
+    }
   }
 
-  c.addEventListener('pointerdown', ()=>{ if (over){ reset(); running=true; } });
-
-  function step(){
-    requestAnimationFrame(step);
+  function loop(){
+    requestAnimationFrame(loop);
     ctx.clearRect(0,0,c.width,c.height);
 
-    if (running && !over){
+    if (state==='title'){
+      drawTitle();
+      return;
+    }
+
+    // GAME
+    if (state==='play'){
       if (t>=nextSpawn){ spawnBanana(); nextSpawn = t + Math.floor(rand(20,40)); }
-      bananas.forEach(b=>{ b.y += b.vy; });
+      bananas.forEach(b=> b.y += b.vy);
       bananas.forEach(b=>{ if (!b.caught && overlap(player,b)){ b.caught=true; score++; } });
       bananas = bananas.filter(b => !b.caught && b.y < GROUND_Y-4);
-
       if (t%60===0) timeLeft -= 1;
-      if (timeLeft<=0){ over=true; running=false; }
+      if (timeLeft<=0){ state='over'; }
       t++;
     }
 
-    drawBackground();
+    drawBG();
     bananas.forEach(drawBanana);
-    drawMonkey();
+    drawPlayer();
     drawHUD();
   }
-  step();
+  loop();
 })();
 </script>
 </body>
