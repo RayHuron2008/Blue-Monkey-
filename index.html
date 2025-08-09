@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Blue Monkey — 3D Maze (Twin-Stick v3)</title>
+<title>Blue Monkey — 3D Maze (Twin-Stick v3.1)</title>
 <style>
   html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:system-ui,Arial}
   #hud{position:fixed;top:8px;left:0;right:0;text-align:center;color:#fff;font-weight:700;text-shadow:0 1px 2px #000;pointer-events:none;z-index:5}
+  #err{position:fixed;left:0;right:0;bottom:0;color:#f66;background:#0008;padding:6px 10px;font:12px/1.3 monospace;display:none;z-index:50}
   canvas{touch-action:none}
-  /* twin joysticks */
   .stickZone{position:fixed;bottom:16px;width:40vmin;height:40vmin;max-width:46vw;max-height:46vw;
              border-radius:50%;background:rgba(255,255,255,.06);backdrop-filter:blur(2px);
              border:1px solid rgba(255,255,255,.12);touch-action:none;z-index:10}
@@ -21,22 +21,27 @@
 </head>
 <body>
 <div id="hud">Left stick: Move • Right stick: Camera • Find the EXIT</div>
+<div id="err"></div>
 <canvas id="view"></canvas>
-
 <div id="left" class="stickZone"><div class="knob"></div></div>
 <div id="right" class="stickZone"><div class="knob"></div></div>
 
 <script src="https://unpkg.com/three@0.158.0/build/three.min.js"></script>
 <script>
-(()=> {
-  // ===== renderer / scene / camera =====
+(() => {
+  const showErr = (msg)=>{ const e=document.getElementById('err'); e.textContent=String(msg); e.style.display='block'; console.error(msg); };
+
+  // ----- THREE setup -----
   const cvs = document.getElementById('view');
-  const R = new THREE.WebGLRenderer({canvas:cvs, antialias:true});
+  let R, scene, cam;
+  try{
+    R = new THREE.WebGLRenderer({canvas:cvs, antialias:true});
+  }catch(e){ showErr(e); return; }
   R.setClearColor(0x0e1216,1);
-  const scene = new THREE.Scene();
+  scene = new THREE.Scene();
   scene.fog = new THREE.Fog(0x0e1216, 40, 160);
 
-  const cam = new THREE.PerspectiveCamera(58, 1, 0.1, 600);
+  cam = new THREE.PerspectiveCamera(58, 1, 0.1, 600);
   function resize(){
     const w=innerWidth,h=innerHeight;
     cam.aspect=w/h; cam.updateProjectionMatrix();
@@ -50,7 +55,7 @@
   const sun = new THREE.DirectionalLight(0xffffff,.95); sun.position.set(1,1.6,0.8);
   scene.add(sun);
 
-  // ===== materials =====
+  // materials
   const mWall  = new THREE.MeshToonMaterial({color:0x2b4458});
   const mFloor = new THREE.MeshToonMaterial({color:0x1a6a34});
   const mExit  = new THREE.MeshToonMaterial({color:0x57ff9a, emissive:0x1cff65, emissiveIntensity:.7});
@@ -58,10 +63,177 @@
   const mFace  = new THREE.MeshToonMaterial({color:0xffe1a8});
   const mBlack = new THREE.MeshToonMaterial({color:0x0d0d0d});
 
-  // ===== maze generation =====
-  const CELLS = 15, CELL=4, WALLH=3;
-  const W = CELLS*2+1, H = CELLS*2+1;
-  const grid = Array.from({length:H}, ()=> Array(W).fill(0));
+  // ----- maze -----
+  const CELLS=15, CELL=4, WALLH=3;
+  const GW = CELLS*2+1, GH = CELLS*2+1;
+  const grid = Array.from({length:GH}, ()=> Array(GW).fill(0));
   function carve(x,y){
     grid[y][x]=1;
-    const dirs=[[2,0],[-2,0],[0,2],[0,-2]].sort(()=>Math.random()-
+    const dirs=[[2,0],[-2,0],[0,2],[0,-2]].sort(()=>Math.random()-0.5);
+    for(const [dx,dy] of dirs){
+      const nx=x+dx, ny=y+dy;
+      if(ny>0&&ny<GH-1&&nx>0&&nx<GW-1 && grid[ny][nx]===0){
+        grid[y+dy/2][x+dx/2]=1; carve(nx,ny);
+      }
+    }
+  }
+  carve(1,1);
+
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(GW*CELL, GH*CELL), mFloor);
+  floor.rotation.x = -Math.PI/2;
+  floor.position.set((GW*CELL)/-2, 0, (GH*CELL)/-2);
+  scene.add(floor);
+
+  const walls=[], wallGeo=new THREE.BoxGeometry(CELL, WALLH, CELL);
+  for(let y=0;y<GH;y++) for(let x=0;x<GW;x++) if(grid[y][x]===0){
+    const mesh = new THREE.Mesh(wallGeo, mWall);
+    mesh.position.set(x*CELL - (GW*CELL)/2 + CELL/2, WALLH/2, y*CELL - (GH*CELL)/2 + CELL/2);
+    scene.add(mesh); walls.push(new THREE.Box3().setFromObject(mesh));
+  }
+
+  const exitCell={x:GW-2,y:GH-2};
+  const exitBox=new THREE.Mesh(new THREE.BoxGeometry(CELL*0.8, WALLH*0.8, CELL*0.8), mExit);
+  exitBox.position.set(exitCell.x*CELL - (GW*CELL)/2 + CELL/2, WALLH*0.4, exitCell.y*CELL - (GH*CELL)/2 + CELL/2);
+  scene.add(exitBox);
+  let exitBB=new THREE.Box3().setFromObject(exitBox);
+
+  // ----- monkey -----
+  function makeMonkey(){
+    const g=new THREE.Group();
+    const body=new THREE.Mesh(new THREE.CapsuleGeometry(0.9,1.2,6,12), mBlue); body.position.y=1.2;
+    const head=new THREE.Mesh(new THREE.SphereGeometry(0.75,16,14), mBlue); head.position.y=2.5;
+    const face=new THREE.Mesh(new THREE.SphereGeometry(0.52,16,14,0,Math.PI*2,0,Math.PI/1.6), mFace);
+    face.scale.set(1,0.85,1); face.position.set(0,2.55,0.55);
+    const eyeL=new THREE.Mesh(new THREE.SphereGeometry(0.08,10,10), mBlack);
+    const eyeR=eyeL.clone(); eyeL.position.set(-0.22,2.65,0.95); eyeR.position.set(0.22,2.65,0.95);
+    const legL=new THREE.Mesh(new THREE.CapsuleGeometry(0.22,0.8,4,10), mBlue);
+    const legR=legL.clone(); legL.position.set(-0.35,0.4,0); legR.position.set(0.35,0.4,0);
+    g.add(body,head,face,eyeL,eyeR,legL,legR); return g;
+  }
+  const player=makeMonkey();
+  const startX=1*CELL-(GW*CELL)/2+CELL/2, startZ=1*CELL-(GH*CELL)/2+CELL/2;
+  player.position.set(startX,0,startZ); scene.add(player);
+
+  // ----- camera (further, higher, smoothed) -----
+  let yaw=0, pitch=0.58, camDist=22;
+  const camPosDesired=new THREE.Vector3(), camTarget=new THREE.Vector3();
+  function updateCamera(){
+    pitch = THREE.MathUtils.clamp(pitch, 0.12, 1.15);
+    const off = new THREE.Vector3(
+      Math.sin(yaw)*Math.cos(pitch),
+      Math.sin(pitch),
+      Math.cos(yaw)*Math.cos(pitch)
+    ).multiplyScalar(camDist);
+    camTarget.set(player.position.x, player.position.y + 3.4, player.position.z);
+    camPosDesired.copy(camTarget).add(off);
+    cam.position.lerp(camPosDesired, 0.2);
+    cam.lookAt(camTarget);
+  }
+
+  // ----- collisions & movement -----
+  const speed=0.12;
+  const playerBB=new THREE.Box3();
+  function collideMove(dx,dz){
+    const next=player.position.clone();
+    // X
+    next.x+=dx;
+    playerBB.setFromCenterAndSize(new THREE.Vector3(next.x,1,player.position.z), new THREE.Vector3(0.8,2,0.8));
+    if(!walls.some(w=>w.intersectsBox(playerBB))) player.position.x=next.x;
+    // Z
+    next.z=player.position.z+dz;
+    playerBB.setFromCenterAndSize(new THREE.Vector3(player.position.x,1,next.z), new THREE.Vector3(0.8,2,0.8));
+    if(!walls.some(w=>w.intersectsBox(playerBB))) player.position.z=next.z;
+  }
+
+  // helper: shortest angle delta
+  function shortAngleDelta(a,b){
+    let d = (b - a) % (Math.PI*2);
+    if (d > Math.PI) d -= Math.PI*2;
+    if (d < -Math.PI) d += Math.PI*2;
+    return d;
+  }
+
+  // ----- joysticks (pure touch/mouse, continuous while held) -----
+  function makeStick(zone){
+    const knob = zone.querySelector('.knob');
+    let active=false, id=null, vec={x:0,y:0};
+    function setKnob(x,y){ knob.style.left=(x*50+50)+'%'; knob.style.top=(y*50+50)+'%'; }
+    function moveFrom(x,y){
+      const r=zone.getBoundingClientRect();
+      let cx=x-(r.left+r.width/2), cy=y-(r.top+r.height/2);
+      const rad=Math.min(r.width,r.height)/2;
+      const len=Math.hypot(cx,cy);
+      if(len<rad*0.12){ vec={x:0,y:0}; setKnob(0,0); return; }
+      if(len>rad){ cx*=rad/len; cy*=rad/len; }
+      vec={x:cx/rad, y:cy/rad}; setKnob(vec.x,vec.y);
+    }
+    // touch
+    zone.addEventListener('touchstart',e=>{ const t=e.changedTouches[0]; active=true; id=t.identifier; moveFrom(t.clientX,t.clientY); e.preventDefault(); },{passive:false});
+    addEventListener('touchmove', e=>{ if(!active) return; for(const t of e.changedTouches){ if(t.identifier===id){ moveFrom(t.clientX,t.clientY); e.preventDefault(); break; } } },{passive:false});
+    addEventListener('touchend',  e=>{ if(!active) return; for(const t of e.changedTouches){ if(t.identifier===id){ active=false; id=null; vec={x:0,y:0}; setKnob(0,0); e.preventDefault(); break; } } },{passive:false});
+    addEventListener('touchcancel', e=>{ if(id!=null){ active=false; id=null; vec={x:0,y:0}; setKnob(0,0);} },{passive:false});
+    // mouse
+    zone.addEventListener('mousedown', e=>{ active=true; id='mouse'; moveFrom(e.clientX,e.clientY); e.preventDefault(); });
+    addEventListener('mousemove', e=>{ if(active&&id==='mouse'){ moveFrom(e.clientX,e.clientY); }});
+    addEventListener('mouseup',   ()=>{ if(id==='mouse'){ active=false; id=null; vec={x:0,y:0}; setKnob(0,0);} });
+    return { get:()=>vec };
+  }
+  const LJ = makeStick(document.getElementById('left'));
+  const RJ = makeStick(document.getElementById('right'));
+
+  // keyboard/mouse (optional desktop)
+  const keys={}; addEventListener('keydown',e=>keys[e.code]=true); addEventListener('keyup',e=>keys[e.code]=false);
+  let mouseDrag=false,lastX=0,lastY=0;
+  cvs.addEventListener('mousedown',e=>{ mouseDrag=true; lastX=e.clientX; lastY=e.clientY; });
+  addEventListener('mouseup',()=>mouseDrag=false);
+  addEventListener('mousemove',e=>{ if(mouseDrag){ yaw -= (e.clientX-lastX)*0.0035; pitch -= (e.clientY-lastY)*0.0035; lastX=e.clientX; lastY=e.clientY; }});
+
+  // ----- loop -----
+  const hud=document.getElementById('hud'); let won=false;
+  function tick(){
+    try{
+      requestAnimationFrame(tick);
+
+      // camera from right stick
+      const cv = RJ.get(); yaw -= cv.x*0.06; pitch -= cv.y*0.05;
+
+      // movement vector: left stick + keyboard
+      const mv = LJ.get();
+      const kF = (keys['KeyW']||keys['ArrowUp']) ?  1 : (keys['KeyS']||keys['ArrowDown']) ? -1 : 0;
+      const kS = (keys['KeyA']||keys['ArrowLeft'])? -1 : (keys['KeyD']||keys['ArrowRight']) ?  1 : 0;
+
+      const forward = new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+      const right   = new THREE.Vector3(forward.z,0,-forward.x);
+
+      const moveX = mv.x + kS;      // strafe
+      const moveY = -mv.y + kF;     // forward/back
+      const dx = (right.x*moveX + forward.x*moveY) * speed;
+      const dz = (right.z*moveX + forward.z*moveY) * speed;
+
+      if (Math.abs(dx)+Math.abs(dz) > 0){
+        collideMove(dx,dz);
+        const targetYaw = Math.atan2(forward.x*moveY + right.x*moveX, forward.z*moveY + right.z*moveX);
+        player.rotation.y += shortAngleDelta(player.rotation.y, targetYaw) * 0.25;
+      }
+
+      updateCamera();
+
+      // win check
+      const playerBox = new THREE.Box3().setFromCenterAndSize(
+        new THREE.Vector3(player.position.x, 1, player.position.z),
+        new THREE.Vector3(0.8,2,0.8)
+      );
+      if (!won && playerBox.intersectsBox(exitBB)){
+        won = true;
+        hud.textContent = 'ESCAPED! Tap to reload a new maze';
+        addEventListener('pointerdown', ()=>location.reload(), {once:true});
+      }
+
+      R.render(scene, cam);
+    }catch(e){ showErr(e); }
+  }
+  tick();
+})();
+</script>
+</body>
+</html>
