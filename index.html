@@ -3,20 +3,20 @@
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Blue Monkey — 3D Maze (Twin-Stick v2)</title>
+<title>Blue Monkey — 3D Maze (Twin-Stick v3)</title>
 <style>
   html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:system-ui,Arial}
-  #hud{position:fixed;top:8px;left:0;right:0;text-align:center;color:#fff;font-weight:700;text-shadow:0 1px 2px #000;pointer-events:none}
+  #hud{position:fixed;top:8px;left:0;right:0;text-align:center;color:#fff;font-weight:700;text-shadow:0 1px 2px #000;pointer-events:none;z-index:5}
   canvas{touch-action:none}
   /* twin joysticks */
   .stickZone{position:fixed;bottom:16px;width:40vmin;height:40vmin;max-width:46vw;max-height:46vw;
              border-radius:50%;background:rgba(255,255,255,.06);backdrop-filter:blur(2px);
-             border:1px solid rgba(255,255,255,.12);touch-action:none}
+             border:1px solid rgba(255,255,255,.12);touch-action:none;z-index:10}
   #left{left:16px}
   #right{right:16px}
   .knob{position:absolute;left:50%;top:50%;width:30%;height:30%;transform:translate(-50%,-50%);
         border-radius:50%;background:rgba(255,255,255,.25);border:2px solid rgba(255,255,255,.5)}
-  @media (min-width:900px){ .stickZone{display:none} } /* on desktop: use WASD + mouse drag */
+  @media (min-width:900px){ .stickZone{display:none} } /* desktop: WASD + mouse drag */
 </style>
 </head>
 <body>
@@ -34,9 +34,9 @@
   const R = new THREE.WebGLRenderer({canvas:cvs, antialias:true});
   R.setClearColor(0x0e1216,1);
   const scene = new THREE.Scene();
-  scene.fog = new THREE.Fog(0x0e1216, 40, 140);
+  scene.fog = new THREE.Fog(0x0e1216, 40, 160);
 
-  const cam = new THREE.PerspectiveCamera(60, 1, 0.1, 500);
+  const cam = new THREE.PerspectiveCamera(58, 1, 0.1, 600);
   function resize(){
     const w=innerWidth,h=innerHeight;
     cam.aspect=w/h; cam.updateProjectionMatrix();
@@ -47,223 +47,21 @@
 
   // lights
   scene.add(new THREE.AmbientLight(0xffffff,.45));
-  const sun = new THREE.DirectionalLight(0xffffff,.9); sun.position.set(1,1.6,0.8);
+  const sun = new THREE.DirectionalLight(0xffffff,.95); sun.position.set(1,1.6,0.8);
   scene.add(sun);
 
   // ===== materials =====
   const mWall  = new THREE.MeshToonMaterial({color:0x2b4458});
   const mFloor = new THREE.MeshToonMaterial({color:0x1a6a34});
-  const mExit  = new THREE.MeshToonMaterial({color:0x57ff9a, emissive:0x1cff65, emissiveIntensity:.6});
+  const mExit  = new THREE.MeshToonMaterial({color:0x57ff9a, emissive:0x1cff65, emissiveIntensity:.7});
   const mBlue  = new THREE.MeshToonMaterial({color:0x2d63ff});
   const mFace  = new THREE.MeshToonMaterial({color:0xffe1a8});
   const mBlack = new THREE.MeshToonMaterial({color:0x0d0d0d});
 
   // ===== maze generation =====
-  const CELLS = 15;
-  const CELL  = 4;
-  const WALLH = 3;
-
+  const CELLS = 15, CELL=4, WALLH=3;
   const W = CELLS*2+1, H = CELLS*2+1;
   const grid = Array.from({length:H}, ()=> Array(W).fill(0));
-
   function carve(x,y){
     grid[y][x]=1;
-    const dirs = [[2,0],[-2,0],[0,2],[0,-2]].sort(()=>Math.random()-0.5);
-    for(const [dx,dy] of dirs){
-      const nx=x+dx, ny=y+dy;
-      if(ny>0&&ny<H-1&&nx>0&&nx<W-1 && grid[ny][nx]===0){
-        grid[y+dy/2][x+dx/2]=1;
-        carve(nx,ny);
-      }
-    }
-  }
-  carve(1,1);
-
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(W*CELL, H*CELL), mFloor);
-  floor.rotation.x = -Math.PI/2;
-  floor.position.set((W*CELL)/-2, 0, (H*CELL)/-2);
-  scene.add(floor);
-
-  const walls = [];
-  const wallGeo = new THREE.BoxGeometry(CELL, WALLH, CELL);
-  for(let y=0;y<H;y++){
-    for(let x=0;x<W;x++){
-      if(grid[y][x]===0){
-        const mesh = new THREE.Mesh(wallGeo, mWall);
-        mesh.position.set(x*CELL - (W*CELL)/2 + CELL/2, WALLH/2, y*CELL - (H*CELL)/2 + CELL/2);
-        scene.add(mesh);
-        walls.push(new THREE.Box3().setFromObject(mesh));
-      }
-    }
-  }
-
-  const exitCell = {x:W-2, y:H-2};
-  const exitBox = new THREE.Mesh(new THREE.BoxGeometry(CELL*0.8, WALLH*0.8, CELL*0.8), mExit);
-  exitBox.position.set(exitCell.x*CELL - (W*CELL)/2 + CELL/2, WALLH*0.4, exitCell.y*CELL - (H*CELL)/2 + CELL/2);
-  scene.add(exitBox);
-  let exitBB = new THREE.Box3().setFromObject(exitBox);
-
-  // ===== low-poly monkey =====
-  function makeMonkey(){
-    const g = new THREE.Group();
-    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.9, 1.2, 6, 12), mBlue); body.position.y=1.2;
-    const head = new THREE.Mesh(new THREE.SphereGeometry(0.75, 16, 14), mBlue); head.position.y=2.5;
-    const face = new THREE.Mesh(new THREE.SphereGeometry(0.52, 16, 14, 0, Math.PI*2, 0, Math.PI/1.6), mFace);
-    face.scale.set(1,0.85,1); face.position.set(0,2.55,0.55);
-    const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.08,10,10), mBlack);
-    const eyeR = eyeL.clone(); eyeL.position.set(-0.22,2.65,0.95); eyeR.position.set(0.22,2.65,0.95);
-    const legL = new THREE.Mesh(new THREE.CapsuleGeometry(0.22, 0.8, 4, 10), mBlue);
-    const legR = legL.clone(); legL.position.set(-0.35, 0.4, 0); legR.position.set(0.35, 0.4, 0);
-    g.add(body, head, face, eyeL, eyeR, legL, legR);
-    return g;
-  }
-  const player = makeMonkey();
-  const startX = 1*CELL - (W*CELL)/2 + CELL/2;
-  const startZ = 1*CELL - (H*CELL)/2 + CELL/2;
-  player.position.set(startX,0,startZ);
-  scene.add(player);
-
-  // ===== third-person camera (pulled back + smooth) =====
-  let yaw = 0, pitch = 0.42, camDist = 16;
-  const camPosDesired = new THREE.Vector3(), camTarget = new THREE.Vector3();
-  function updateCamera(){
-    pitch = THREE.MathUtils.clamp(pitch, 0.10, 1.10);
-    const off = new THREE.Vector3(
-      Math.sin(yaw)*Math.cos(pitch),
-      Math.sin(pitch),
-      Math.cos(yaw)*Math.cos(pitch)
-    ).multiplyScalar(camDist);
-    camTarget.set(player.position.x, player.position.y + 2.8, player.position.z);
-    camPosDesired.copy(camTarget).add(off);
-    cam.position.lerp(camPosDesired, 0.15);
-    cam.lookAt(camTarget);
-  }
-
-  // ===== collisions =====
-  const speed = 0.10;
-  const playerBB = new THREE.Box3();
-  function collideMove(dx, dz){
-    const next = player.position.clone();
-    // X
-    next.x += dx;
-    playerBB.setFromCenterAndSize(new THREE.Vector3(next.x,1,player.position.z), new THREE.Vector3(0.8,2,0.8));
-    if (!walls.some(w => w.intersectsBox(playerBB))) player.position.x = next.x;
-    // Z
-    next.z = player.position.z + dz;
-    playerBB.setFromCenterAndSize(new THREE.Vector3(player.position.x,1,next.z), new THREE.Vector3(0.8,2,0.8));
-    if (!walls.some(w => w.intersectsBox(playerBB))) player.position.z = next.z;
-  }
-
-  // ===== twin joysticks (continuous vector while held) =====
-  function makeStick(zoneEl){
-    const knob = zoneEl.querySelector('.knob');
-    let active=false, pointerId=null;
-    let vec={x:0,y:0};
-
-    function setKnob(x,y){
-      knob.style.left = (x*50+50)+'%';
-      knob.style.top  = (y*50+50)+'%';
-    }
-    function clampVec(cx,cy,r){
-      const len = Math.hypot(cx,cy);
-      if (len < r*0.12) return {x:0,y:0}; // dead-zone
-      const m = Math.min(1, len/r);
-      return { x:(cx/len)*m, y:(cy/len)*m };
-    }
-
-    zoneEl.addEventListener('pointerdown', e=>{
-      active=true; pointerId=e.pointerId; vec={x:0,y:0}; setKnob(0,0); e.preventDefault();
-    }, {passive:false});
-
-    addEventListener('pointermove', e=>{
-      if (!active || e.pointerId!==pointerId) return;
-      const r = zoneEl.getBoundingClientRect();
-      const cx = e.clientX - (r.left + r.width/2);
-      const cy = e.clientY - (r.top  + r.height/2);
-      vec = clampVec(cx,cy,Math.min(r.width,r.height)/2);
-      setKnob(vec.x, vec.y);
-      e.preventDefault();
-    }, {passive:false});
-
-    addEventListener('pointerup', e=>{
-      if (e.pointerId!==pointerId) return;
-      active=false; pointerId=null; vec={x:0,y:0}; setKnob(0,0);
-    }, {passive:false});
-
-    // touch fallback to avoid scrolling
-    zoneEl.addEventListener('touchstart', e=>e.preventDefault(), {passive:false});
-    addEventListener('touchmove', e=>e.preventDefault(), {passive:false});
-    addEventListener('touchend',  e=>e.preventDefault(), {passive:false});
-
-    return { get: ()=>vec };
-  }
-  const LJ = makeStick(document.getElementById('left'));   // movement
-  const RJ = makeStick(document.getElementById('right'));  // camera
-
-  // keyboard & mouse (desktop helpers)
-  const keys = {};
-  addEventListener('keydown', e=> keys[e.code]=true);
-  addEventListener('keyup',   e=> keys[e.code]=false);
-  let mouseDown=false,lastX=0,lastY=0;
-  cvs.addEventListener('mousedown', e=>{ mouseDown=true; lastX=e.clientX; lastY=e.clientY; });
-  addEventListener('mouseup', ()=> mouseDown=false);
-  addEventListener('mousemove', e=>{
-    if(!mouseDown) return;
-    const dx=e.clientX-lastX, dy=e.clientY-lastY; lastX=e.clientX; lastY=e.clientY;
-    yaw -= dx*0.0035; pitch -= dy*0.0035;
-  });
-
-  // ===== loop =====
-  const hud = document.getElementById('hud');
-  let won=false;
-
-  function tick(){
-    requestAnimationFrame(tick);
-
-    // read sticks
-    const mv = LJ.get();
-    const cv = RJ.get();
-
-    // camera from right stick
-    yaw   -= cv.x * 0.06;
-    pitch -= cv.y * 0.05;
-
-    // keyboard fallback (adds to sticks)
-    const kF = (keys['KeyW']||keys['ArrowUp']) ?  1 : (keys['KeyS']||keys['ArrowDown']) ? -1 : 0;
-    const kS = (keys['KeyA']||keys['ArrowLeft'])? -1 : (keys['KeyD']||keys['ArrowRight']) ?  1 : 0;
-
-    // move in camera plane (up on stick = forward)
-    const forward = new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
-    const right   = new THREE.Vector3(forward.z,0,-forward.x);
-    const moveX = mv.x + kS;          // strafe
-    const moveY = -mv.y + kF;         // forward/back
-    const dx = (right.x*moveX + forward.x*moveY) * speed;
-    const dz = (right.z*moveX + forward.z*moveY) * speed;
-    if (Math.abs(dx)+Math.abs(dz) > 0) collideMove(dx,dz);
-
-    // face movement direction
-    if (Math.abs(moveX)+Math.abs(moveY) > 0.01){
-      const targetYaw = Math.atan2(forward.x*moveY + right.x*moveX, forward.z*moveY + right.z*moveX);
-      player.rotation.y += THREE.MathUtils.angleDiff(player.rotation.y, targetYaw) * 0.2;
-    }
-
-    updateCamera();
-
-    // win check
-    const playerBox = new THREE.Box3().setFromCenterAndSize(
-      new THREE.Vector3(player.position.x, 1, player.position.z),
-      new THREE.Vector3(0.8,2,0.8)
-    );
-    if (!won && playerBox.intersectsBox(exitBB)){
-      won = true;
-      hud.textContent = 'ESCAPED! Tap to reload a new maze';
-      addEventListener('pointerdown', ()=>location.reload(), {once:true});
-    }
-
-    R.render(scene, cam);
-  }
-  tick();
-})();
-</script>
-</body>
-</html>
+    const dirs=[[2,0],[-2,0],[0,2],[0,-2]].sort(()=>Math.random()-
